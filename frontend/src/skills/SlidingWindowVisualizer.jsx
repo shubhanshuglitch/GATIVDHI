@@ -1,9 +1,10 @@
 /**
- * SlidingWindowVisualizer.jsx — Skill: Animated Sliding Window
- * ==============================================================
- * Skills System: Step-by-step sliding window animation for SMA computation.
+ * SlidingWindowVisualizer.jsx — Skill: Enhanced Rolling Average Visualizer
+ * ========================================================================
+ * Skills System: Transforms technical sliding window into a "Trend Smoother"
+ * that explains how the moving average removes market noise.
  */
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 
 export default function SlidingWindowVisualizer({ swData }) {
   const [currentStep, setCurrentStep] = useState(0);
@@ -14,62 +15,75 @@ export default function SlidingWindowVisualizer({ swData }) {
 
   useEffect(() => {
     if (!playing || currentStep >= totalSteps - 1) { setPlaying(false); return; }
-    const timer = setTimeout(() => setCurrentStep(s => s + 1), 300);
+    const timer = setTimeout(() => setCurrentStep(s => s + 1), 250);
     return () => clearTimeout(timer);
   }, [playing, currentStep, totalSteps]);
 
-  if (!steps.length) return <div className="empty-state">No visualization data</div>;
+  if (!steps.length) return <div className="empty">No live data available</div>;
 
   const step = steps[currentStep] || steps[0];
-  const displayValues = steps.slice(0, Math.min(40, totalSteps));
+  // Limit display to a reasonable chunk for UI
+  const startIdx = Math.max(0, currentStep - 15);
+  const endIdx = Math.min(totalSteps, startIdx + 30);
+  const displaySteps = steps.slice(startIdx, endIdx);
 
   return (
-    <div className="fade-in">
-      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '8px' }}>
-        Window Size: {swData.window_size} |
-        Time: <code style={{ color: 'var(--accent-blue)' }}>O(n)</code> |
-        Per Step: <code style={{ color: 'var(--accent-green)' }}>O(1)</code>
+    <div className="fade-in sw-container">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <div style={{ fontSize: '0.95rem', fontWeight: 700 }}>Live Trend Smoothing</div>
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>How the algorithm filters out daily price noise</div>
+        </div>
+        <div className="card-badge b-purple" style={{ fontSize: '0.7rem' }}>WINDOW: {swData.window_size} DAYS</div>
       </div>
 
-      {/* Controls */}
-      <div className="btn-group" style={{ marginBottom: '10px' }}>
-        <button className="btn btn-sm btn-secondary" onClick={() => { setCurrentStep(0); setPlaying(false); }}>⏮</button>
-        <button className="btn btn-sm btn-secondary" onClick={() => setCurrentStep(Math.max(0, currentStep - 1))}>←</button>
-        <button className="btn btn-sm btn-primary" onClick={() => setPlaying(!playing)}>
-          {playing ? '⏸ Pause' : '▶ Play'}
-        </button>
-        <button className="btn btn-sm btn-secondary" onClick={() => setCurrentStep(Math.min(totalSteps - 1, currentStep + 1))}>→</button>
-        <span style={{ padding: '5px 10px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-          Step {currentStep + 1}/{totalSteps}
-        </span>
+      <div className="sw-narrative">
+        The "Sliding Window" algorithm calculates a <strong>Rolling Average</strong> by efficiently updating the sum as it moves. 
+        It adds the newest price and removes the oldest price in <strong>constant time</strong>.
       </div>
 
-      {/* Value array with window highlight */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', marginBottom: '10px' }}>
-        {displayValues.map((s, i) => {
-          const inWindow = i >= step.window_start && i <= step.window_end && i <= currentStep;
-          const isCurrent = i === currentStep;
+      <div className="sw-strip">
+        {displaySteps.map((s, i) => {
+          const globalIdx = startIdx + i;
+          const inWindow = globalIdx >= step.window_start && globalIdx <= step.window_end && globalIdx <= currentStep;
+          const isCurrent = globalIdx === currentStep;
+          const isOut = globalIdx < step.window_start && globalIdx < currentStep;
+          
           return (
-            <div key={i} style={{
-              padding: '4px 6px', borderRadius: '4px', fontSize: '0.7rem', minWidth: '38px', textAlign: 'center',
-              background: isCurrent ? 'rgba(0,212,255,0.3)' : inWindow ? 'rgba(0,255,136,0.15)' : 'var(--bg-glass)',
-              border: `1px solid ${isCurrent ? 'var(--accent-blue)' : inWindow ? 'rgba(0,255,136,0.3)' : 'var(--border-glass)'}`,
-              color: isCurrent ? 'var(--accent-blue)' : inWindow ? 'var(--accent-green)' : 'var(--text-muted)',
-              transition: 'all 0.2s',
-            }}>
-              {s.new_value}
+            <div key={globalIdx} className={`sw-cell ${isCurrent ? 'focus' : inWindow ? 'active' : isOut ? 'out' : ''}`}>
+              {s.new_value?.toFixed(0)}
             </div>
           );
         })}
       </div>
 
-      {/* Step info */}
-      <div style={{ background: 'var(--bg-glass)', border: '1px solid var(--border-glass)', borderRadius: '8px', padding: '10px', fontSize: '0.78rem' }}>
-        <div>📍 Position: <strong>{step.step}</strong> | New: <strong style={{ color: 'var(--accent-blue)' }}>{step.new_value}</strong>
-          {step.removed_value !== null && <> | Removed: <strong style={{ color: 'var(--accent-red)' }}>{step.removed_value}</strong></>}
+      <div className="btn-group" style={{ justifyContent: 'center' }}>
+        <button className="btn btn-sm" onClick={() => { setCurrentStep(0); setPlaying(false); }}>⏮ Reset</button>
+        <button className="btn btn-sm btn-primary" onClick={() => setPlaying(!playing)} style={{ minWidth: '100px' }}>
+          {playing ? '⏸ Pause' : '▶ Play Animation'}
+        </button>
+        <button className="btn btn-sm" onClick={() => setCurrentStep(Math.min(totalSteps - 1, currentStep + 1))}>Next Step ⏭</button>
+      </div>
+
+      <div className="sw-insight">
+        <div className="insight-box">
+          <div className="val">₹{step.new_value?.toFixed(2)}</div>
+          <div className="lbl">Incoming Price</div>
         </div>
-        <div>Window: [{step.window_start}..{step.window_end}] | Sum: {step.window_sum}
-          {step.average !== null && <> | <strong style={{ color: 'var(--accent-green)' }}>Avg: {step.average}</strong></>}
+        <div className="insight-box">
+          <div className="val" style={{ color: 'var(--green)' }}>₹{step.average?.toFixed(2)}</div>
+          <div className="lbl">Smoothed Trend</div>
+        </div>
+      </div>
+
+      <div style={{ padding: '10px', borderRadius: 'var(--radius-sm)', background: 'var(--bg-surface)', border: '1px solid var(--border)', fontSize: '0.75rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+          <span style={{ color: 'var(--text-muted)' }}>Calculation Strategy:</span>
+          <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Incremental Update</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <span style={{ color: 'var(--text-muted)' }}>Engine Speed:</span>
+          <span style={{ color: 'var(--green)', fontWeight: 600 }}>Instant (O(1))</span>
         </div>
       </div>
     </div>

@@ -39,6 +39,7 @@ export default function Dashboard() {
   const [complexLoading, setComplexLoading] = useState(false);
   const [backtest, setBacktest] = useState(null);
   const [btLoading, setBtLoading] = useState(false);
+  const [numTrades, setNumTrades] = useState(2);
 
   // Search
   const doSearch = useCallback(async (q) => {
@@ -46,6 +47,18 @@ export default function Dashboard() {
     try { const { data } = await api.searchStocks(q); setSearchResults(data.results || []); setShowSearch(true); } catch { setSearchResults([]); }
   }, []);
   useEffect(() => { const t = setTimeout(() => doSearch(searchQuery), 300); return () => clearTimeout(t); }, [searchQuery, doSearch]);
+  
+  // Keyboard Shortcut (Slash to Search)
+  useEffect(() => {
+    const handleKey = (e) => {
+      if (e.key === '/' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        document.querySelector('.tb-search input')?.focus();
+      }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, []);
 
   const selectTicker = async (sym) => {
     setTicker(sym); setShowSearch(false); setSearchQuery(sym); setSearchResults([]);
@@ -67,7 +80,7 @@ export default function Dashboard() {
     } catch(e) { setPrediction({error:e.message}); } finally { setPredLoading(false); } };
 
   const runAlgo = async (t) => { if (!ticker) return; setAlgoLoading(true); setAlgoTab(t);
-    try { if (t==='dp') setDpData((await api.algoBestTrade({ticker,period:'1y',max_transactions:2})).data);
+    try { if (t==='dp') setDpData((await api.algoBestTrade({ticker,period:'1y',max_transactions:numTrades})).data);
       else if (t==='dc') setDcData((await api.algoRegression({ticker,period:'1y'})).data);
       else setSwData((await api.algoVisualizeSW({ticker,period:'1y'})).data);
     } catch {} finally { setAlgoLoading(false); } };
@@ -81,9 +94,24 @@ export default function Dashboard() {
       <span className="si">🔍</span>
       <input placeholder="Search stocks..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
         onFocus={() => searchResults.length && setShowSearch(true)} onBlur={() => setTimeout(() => setShowSearch(false), 200)} />
-      {showSearch && searchResults.length > 0 && (
+      <div className="search-shortcut">/</div>
+      {showSearch && (searchQuery.length > 0) && (
         <div className="search-dropdown">
-          {searchResults.map((s,i) => (<div key={i} className="sd-item" onClick={() => selectTicker(s.symbol)}><span className="sym">{s.symbol}</span><span className="name">{s.name}</span></div>))}
+          {searchResults.length > 0 ? (
+            searchResults.map((s,i) => (
+              <div key={i} className="sd-item" onClick={() => selectTicker(s.symbol)}>
+                <div style={{ display:'flex', flexDirection:'column' }}>
+                  <span className="sym">{s.symbol}</span>
+                  <span className="name">{s.name}</span>
+                </div>
+                <span className="card-badge b-blue" style={{ fontSize:'0.6rem' }}>{s.exchange}</span>
+              </div>
+            ))
+          ) : (
+            <div className="empty" style={{ padding:'1rem', fontSize:'0.8rem' }}>
+              No stocks found for "{searchQuery}"
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -238,8 +266,15 @@ export default function Dashboard() {
           <div className="split">
             <div className="col-main">
               <PanelManager title="LSTM Model Prediction" loading={predLoading}>
-                <div className="btn-group" style={{marginBottom:8}}>
-                  {['arima','lstm','hybrid'].map(m => <button key={m} className={`btn btn-sm ${predModel===m?'active':''}`} onClick={() => runPrediction(m)}>{m.toUpperCase()}</button>)}
+                <div style={{ display:'flex', gap:10, marginBottom:8, alignItems:'center' }}>
+                  <div className="btn-group">
+                    {['arima','lstm','hybrid'].map(m => <button key={m} className={`btn btn-sm ${predModel===m?'active':''}`} onClick={() => runPrediction(m)}>{m.toUpperCase()}</button>)}
+                  </div>
+                  <div style={{ display:'flex', alignItems:'center', gap:5, marginLeft:'auto' }}>
+                    <span style={{ fontSize:'0.7rem', color:'var(--text-muted)' }}>Max Trades:</span>
+                    <input type="number" min="1" max="10" value={numTrades} onChange={e => setNumTrades(parseInt(e.target.value)||1)} 
+                      style={{ width:40, background:'var(--bg-card)', border:'1px solid var(--border)', color:'var(--text-primary)', borderRadius:4, padding:'2px 5px', fontSize:'0.75rem' }} />
+                  </div>
                 </div>
                 {!prediction && stockData && <PriceChart labels={stockData.data.map(d=>d.Date)} datasets={[{label:'Actual Price',data:stockData.data.map(d=>d.Close),fill:true}]} title={`${ticker} — Historical`}/>}
                 {prediction && !prediction.error && <PriceChart labels={[...(prediction.dates||[]),...Array.from({length:prediction.forecast_days||30},(_,i)=>`F+${i+1}`)]}
@@ -248,12 +283,12 @@ export default function Dashboard() {
               </PanelManager>
               <div className="skills-sec"><div className="skills-lbl">Skills</div>
                 <div className="skills-row">
-                  <PanelManager title="SHAP Feature Importance (Explainable AI)">
-                    {prediction?.metrics ? <PredictionCard model={prediction.model} metrics={prediction.metrics||prediction.metrics_hybrid} forecast={prediction.future_forecast||prediction.hybrid_future}/> : <div className="empty" style={{padding:'1rem'}}>Run a prediction first</div>}
+                  <PanelManager title="Model Accuracy & Outlook (Explainable AI)">
+                    {prediction?.metrics ? <PredictionCard metrics={prediction.metrics||prediction.metrics_hybrid} forecast={prediction.future_forecast||prediction.hybrid_future} lp={lp}/> : <div className="empty" style={{padding:'1rem'}}>Run a prediction first</div>}
                   </PanelManager>
                   <PanelManager title="Backtesting" subtitle="Simulated P/L" loading={btLoading}>
                     {!backtest ? <div className="empty"><button className="btn btn-primary" onClick={runBacktest}>Simulate</button></div> : (
-                      <div className="m-grid">{[['₹'+backtest.final_value,'Final','--green'],[backtest.total_return_pct+'%','Return',backtest.total_return_pct>0?'--green':'--red'],[backtest.buy_hold_return_pct+'%','B&H',backtest.buy_hold_return_pct>0?'--green':'--red']].map(([v,l,c],i)=>
+                      <div className="m-grid">{[['₹'+backtest.final_value,'Final','--green'],[backtest.total_return_pct+'%','Return',backtest.total_return_pct>0?'--green':'--red'],[backtest.buy_hold_return_pct+'%','Market Avg (Hold)',backtest.buy_hold_return_pct>0?'--green':'--red']].map(([v,l,c],i)=>
                         <div key={i} className="m-box"><div className="n" style={{color:`var(${c})`}}>{v}</div><div className="lb">{l}</div></div>)}</div>
                     )}
                   </PanelManager>
@@ -287,35 +322,61 @@ export default function Dashboard() {
         if (activeTab === 'daa') return (
           <div className="split">
             <div className="col-main">
-              <PanelManager title={algoTab==='dp'?'DP Stock Profit (O(n))':algoTab==='dc'?'Divide & Conquer Regression':'Sliding Window Analysis'} loading={algoLoading}>
-                <div className="btn-group" style={{marginBottom:8}}>
-                  {[['dp','DP (Buy/Sell)'],['dc','D&C (Regression)'],['sw','Sliding Window']].map(([id,lb])=>
-                    <button key={id} className={`btn btn-sm ${algoTab===id?'active':''}`} onClick={()=>runAlgo(id)}>{lb}</button>)}
+              <PanelManager title={algoTab==='dp'?'DP Stock Profit (O(n))':algoTab==='dc'?'Divide & Conquer Regression':algoTab==='sw'?'Trend Smoothing Engine':'Algorithm Visualizer'} loading={algoLoading}>
+                <div style={{ display:'flex', gap:10, marginBottom:8, alignItems:'center' }}>
+                  <div className="btn-group">
+                    {[['dp','DP (Buy/Sell)'],['dc','D&C (Regression)'],['sw','Sliding Window']].map(([id,lb])=>
+                      <button key={id} className={`btn btn-sm ${algoTab===id?'active':''}`} onClick={()=>runAlgo(id)}>{lb}</button>)}
+                  </div>
+                  {algoTab==='dp' && (
+                    <div style={{ display:'flex', alignItems:'center', gap:5, marginLeft:'auto' }}>
+                      <span style={{ fontSize:'0.7rem', color:'var(--text-muted)' }}>Allowed Trades:</span>
+                      <input type="number" min="1" max="10" value={numTrades} onChange={e => setNumTrades(parseInt(e.target.value)||1)} 
+                        style={{ width:40, background:'var(--bg-card)', border:'1px solid var(--border)', color:'var(--text-primary)', borderRadius:4, padding:'2px 5px', fontSize:'0.75rem' }} />
+                    </div>
+                  )}
                 </div>
-                {algoTab==='dp'&&dpData&&<><div className="m-grid" style={{marginBottom:8}}><div className="m-box"><div className="n" style={{color:'var(--amber)'}}>{dpData.naive?.execution_time_ms}ms</div><div className="lb">Naive O(n²)</div></div><div className="m-box"><div className="n" style={{color:'var(--green)'}}>{dpData.single?.execution_time_ms}ms</div><div className="lb">DP O(n)</div></div><div className="m-box"><div className="n" style={{color:'var(--accent)'}}>₹{dpData.single?.max_profit}</div><div className="lb">Max Profit</div></div></div><DPTableVisualizer dpData={dpData.k_transactions}/></>}
-                {algoTab==='dc'&&dcData&&<><PriceChart labels={dcData.dates||[]} datasets={[{label:'Actual',data:dcData.actual_prices},{label:'D&C Prediction',data:dcData.predictions,color:'var(--green)'}]}/><RecursionTreeVisualizer treeData={dcData.recursion_tree} segments={dcData.segments}/></>}
+                {algoTab==='dp'&&dpData&&<>
+                  <div className="m-grid" style={{marginBottom:10}}>
+                    <div className="m-box" style={{ borderColor: 'rgba(255,170,0,0.2)' }}>
+                      <div className="n" style={{color:'var(--amber)'}}>{dpData.naive?.execution_time_ms}ms</div>
+                      <div className="lb">Legacy (Naive)</div>
+                    </div>
+                    <div className="m-box" style={{ borderColor: 'rgba(0,214,143,0.2)' }}>
+                      <div className="n" style={{color:'var(--green)'}}>{dpData.single?.execution_time_ms}ms</div>
+                      <div className="lb">Gatividhi Opt.</div>
+                    </div>
+                    <div className="m-box">
+                      <div className="n" style={{color:'var(--accent)'}}>₹{dpData.single?.max_profit}</div>
+                      <div className="lb">Target Profit</div>
+                    </div>
+                  </div>
+                  <DPTableVisualizer dpData={dpData.k_transactions}/>
+                </>}
+                {algoTab==='dc'&&dcData&&<><PriceChart labels={dcData.dates||[]} datasets={[{label:'Actual',data:dcData.actual_prices},{label:'D&C Prediction',data:dcData.predictions,color:'var(--green)'}]}/><RecursionTreeVisualizer treeData={dcData.recursion_tree} segments={dcData.segments} dates={dcData.dates} prices={dcData.actual_prices}/></>}
                 {algoTab==='sw'&&swData&&<SlidingWindowVisualizer swData={swData}/>}
                 {!dpData&&!dcData&&!swData&&!algoLoading&&<div className="empty">Select an algorithm above</div>}
               </PanelManager>
               <div className="skills-sec"><div className="skills-lbl">Skills</div>
                 <div className="skills-row">
-                  <PanelManager title="Complexity Profile">
+                  <PanelManager title="Performance Analysis">
                     {dpData||dcData||swData ? <div className="m-row">
-                      <div className="m-item"><span className="l">Algorithm</span><span className="v">{algoTab==='dp'?'DP Best Trade':algoTab==='dc'?'D&C Regression':'Sliding Window'}</span></div>
-                      <div className="m-item"><span className="l">Time Complexity</span><span className="v" style={{color:'var(--accent)',fontFamily:'monospace'}}>{algoTab==='dp'?'O(N)':algoTab==='dc'?'O(N log N)':'O(N)'}</span></div>
+                      <div className="m-item"><span className="l">Processing Style</span><span className="v">{algoTab==='dp'?'Efficiency Optimized (DP)':algoTab==='dc'?'Recursive Breakdown (D&C)':'Live Rolling Average'}</span></div>
+                      <div className="m-item"><span className="l">Speed Rating</span><span className="v" style={{color:'var(--green)'}}>{algoTab==='dc'?'Fast (O(N log N))':'Ultra Fast (O(N))'}</span></div>
+                      <div className="m-item"><span className="l">Data Handling</span><span className="v">{algoTab==='dp'?'Batch Analysis':algoTab==='dc'?'Hierarchical':'Sequential'}</span></div>
                     </div> : <div className="empty" style={{padding:'0.8rem'}}>Run an algorithm first</div>}
                   </PanelManager>
                   <PanelManager title="Step-by-Step Visualization">
-                    {algoTab==='dp'&&dpData?<DPTableVisualizer dpData={dpData.k_transactions}/>:algoTab==='dc'&&dcData?<RecursionTreeVisualizer treeData={dcData.recursion_tree} segments={dcData.segments}/>:algoTab==='sw'&&swData?<SlidingWindowVisualizer swData={swData}/>:<div className="empty" style={{padding:'0.8rem'}}>Run algorithm first</div>}
+                    {algoTab==='dp'&&dpData?<DPTableVisualizer dpData={dpData.k_transactions}/>:algoTab==='dc'&&dcData?<RecursionTreeVisualizer treeData={dcData.recursion_tree} segments={dcData.segments} dates={dcData.dates} prices={dcData.actual_prices}/>:algoTab==='sw'&&swData?<SlidingWindowVisualizer swData={swData}/>:<div className="empty" style={{padding:'0.8rem'}}>Run algorithm first</div>}
                   </PanelManager>
                 </div>
               </div>
             </div>
             <div className="col-side">
-              <PanelManager title="Performance Metrics" subtitle="Powered by Reusable Skill">
+              <PanelManager title="Technical Specs" subtitle="Algorithm Characteristics">
                 {dpData||dcData||swData ? <div className="m-row">
-                  <div className="m-item"><span className="l">Time Complexity</span><span className="v" style={{color:'var(--accent)',fontFamily:'monospace'}}>{algoTab==='dp'?'O(N)':algoTab==='dc'?'O(N log N)':'O(N)'}</span></div>
-                  <div className="m-item"><span className="l">Space Complexity</span><span className="v" style={{fontFamily:'monospace'}}>O(1)</span></div>
+                  <div className="m-item"><span className="l">Efficiency</span><span className="v" style={{color:'var(--accent)'}}>{algoTab==='dp'?'Optimal':algoTab==='dc'?'High':'Excellent'}</span></div>
+                  <div className="m-item"><span className="l">Memory Footprint</span><span className="v">{algoTab==='dp'?'Low (O(1))':algoTab==='dc'?'Medium (O(log N))':'Minimal (O(1))'}</span></div>
                 </div> : <div className="empty" style={{padding:'1rem'}}>Run an algorithm</div>}
               </PanelManager>
               <PanelManager title="Chat Assistant"><ChatBot ticker={ticker}/></PanelManager>
